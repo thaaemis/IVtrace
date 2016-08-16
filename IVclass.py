@@ -6,10 +6,16 @@
 #   Convert to electron current DONE
 #   Derivative, smoothing to get to EEDF DONE
 
+# standard process for filtered Godyak datafile:
+    # define IVobj(filename, path, flow... )
+    # getFiltData(), loadFile(), correctIV()
+    # getVp() and other analysis techniques (EEDF, etc.?)
+    # plotTrace()
+
 from scipy import signal
-import numpy
+import numpy as np
 from pylab import *
-from savitsky import savitzky_golay
+# from savitsky import savitzky_golay
 
 class IVlist:
    def __init__(self):
@@ -59,293 +65,303 @@ class IVlist:
       return R,Vp,Vperr,Vf,Vferr,n,nerr,Te,Teerr
    
 class IVobj:
-   def __init__(self,filename,probetype,flow,B,P,V,I,pos,ind):
-      probeDict = {'EP':0,'LP':1,'RP':2,'IP':3,'BP':4}
-      def LPr(r):
-         return (4-r)*10 # mm to cm
-      def RPr(r):
-         return (4-r-4.5)*10 # mm to cm
-      def reg(r):
-         return r
-      radfunc = [reg,LPr,RPr,reg,reg]
-      self.probetype = probeDict[probetype]
-      proberad = radfunc[self.probetype](pos)
-      self.filename = str(filename)
-      self.flow = float(flow) # Xe gauge reading
-      self.B = float(B) # in mV from gauge
-      self.P = P # mTorr in chamber
-      self.Vcathode = V # bias provided to cathode, V
-      self.Itot = I # total plasma current
-      self.R = proberad
-      self.ind = ind
+    def __init__(self,filename,path,flow,B,P,V,I,pos,ind):
+       self.probetype = 'LP'
+       self.filename = str(filename)
+       self.path = str(path)
+       self.flow = float(flow) # Xe gauge reading
+       self.B = float(B) # in mV from gauge
+       self.P = P # mTorr in chamber
+       self.Vcathode = V # bias provided to cathode, V
+       self.Itot = I # total plasma current
+       self.R = pos
+       self.ind = ind
+       # for plotting:
+       self.colorDict = {(2,1):'g',(2,2):'b',(2,4):'m',(2,8):'k',(4,1):'r',(4,2):'c'}
 
-   def getrawdata(self,path):
-      with open(path+'/RawData'+self.filename,'r') as f:
-         self.rawtext = f.read()
-      return None
+       self.getData()
+       self.loadFile()
+       self.correctIV()
+       self.Ielectron()
+       self.getVf()
+       self.getVp()
 
-   def getfiltdata(self,path):
-      with open(path+'/'+self.filename,'r') as f:
-         self.filttext = f.read()
-      return None
+    def getData(self,path = ''):
+        if path == '':
+            path = self.path
+        with open(path+'/RawData'+self.filename,'r') as f:
+            self.rawtext = f.read()
+        with open(path+'/'+self.filename,'r') as f:
+            self.filttext = f.read()
 
-   def correctVaxis(self):
-      VpGodyak = float(self.GodyakStats['Vs'])
-      self.V = [-float(x)+VpGodyak for x in self.filtV]
-      
-      probeArea = float(self.GodyakStats['A(mm2)'])
-      self.I = [x*probeArea for x in self.filtJ]
-      
-      return None
+        return None
 
-   def readfile(self,raw=True):
-      try:    
-         txt = self.rawtext if raw else self.filttext
-      except AttributeError:
-         print('First get data file with self.getrawdata(), self.getfiltdata()!')
-
-      lines = txt.split("\n")
-      if raw:
-         labels,params,V,Javg,J = [],[],[],[],[]
-         for i in range(1,len(lines)):
-            line = lines[i]
+    def loadFile(self):
+        rawTxt = self.rawtext
+        filtTxt = self.filttext
+        
+        rawLines = rawTxt.split("\n")
+        filtLines = filtTxt.split("\n")
+        filtLines.pop(0)
+        labels, params, V, J = [],[],[],[] # in all files
+        derivJ, deriv2J, E, EEPF = [],[],[],[] # only in filtered files
+        Vraw, JrawAvg = [], [] # only in raw file
+        initialLine = rawLines.pop(0)
+        
+        rawHeadings = initialLine.split('\t')
+        numTraces = rawHeadings.count('J')
+        Jraw = np.zeros((numTraces, len(rawLines)-1))
+        
+        for line in filtLines:
             if line.count('\t') < 2:
-               break
-            if line.count('J') > 5:
-               continue
+                break
+            if line.count('Parameter') < 0:
+                continue
             vals = line.split('\t')
             labels.append(vals[0])
             params.append(vals[1])
-            print(vals)
             V.append(float(vals[2]))
-            Javg.append(float(vals[3]))
-            for i in range(4,len(vals)):
-               J.append([])
-               J[i-4].append(float(vals[i]))
+            J.append(float(vals[3]))
+            derivJ.append(float(vals[4]))
+            deriv2J.append(float(vals[5]))
+            E.append(vals[6])
+            EEPF.append(vals[7])
 
-         labels = list(filter(None,labels))
-         params = params[:len(labels)] 
-         GodyakParams = {}
-         for i in range(0,len(labels)):
-            GodyakParams[labels[i]] = params[i]
-         self.GodyakStats = GodyakParams
-         self.rawV = V
-         self.rawJavg = Javg
-         self.Jarray = J
-         print(len(self.rawJavg))
-         return None
-      else:
-         self.filtlabels,self.filtparams,self.filtV,self.filtJ = [],[],[],[]
-         self.filtderivJ,self.filtderiv2J,self.filtE,self.filtEEPF = [],[],[],[]
-         for i in range(1,len(lines)):
-            line = lines[i]
+        for i in range(len(rawLines)):
+            line = rawLines[i]
             if line.count('\t') < 2:
-               break
-            if line.count('Parameter') < 0:
-               continue
-            vals = line.split('\t')
-            self.filtlabels.append(vals[0])
-            self.filtparams.append(vals[1])
-            self.filtV.append(float(vals[2]))
-            self.filtJ.append(float(vals[3]))
-            self.filtderivJ.append(float(vals[4]))
-            self.filtderiv2J.append(float(vals[5]))
-            self.filtE.append(vals[6])
-            self.filtEEPF.append(vals[7])
-         labels = list(filter(None,self.filtlabels))
-         params = self.filtparams[:len(labels)] 
-         GodyakParams = {}
-         for i in range(0,len(labels)):
+                break
+            vals = rawLines[i].split('\t')
+            Vraw.append(float(vals[2]))
+            JrawAvg.append(float(vals[3]))
+            if numTraces > 0:
+                for j in range(numTraces):
+                    Jraw[j,i] = vals[4+j] # 0 : trace, 1 : point
+
+        labels = list(filter(None, labels))
+        params = params[:len(labels)] 
+        GodyakParams = {}
+        for i in range(0,len(labels)):
             GodyakParams[labels[i]] = params[i]
-         self.GodyakStats = GodyakParams
+        self.GodyakStats = GodyakParams
+        self.labels = list(filter(None,labels))
+        self.params = params[:len(self.labels)]
+        self.fileV = list(filter(None,V))
+        if (np.shape(Jraw)[0] > 0):
+            Jraw = np.mean(Jraw, 0)
+        else:
+            Jraw = JrawAvg
+        self.Jraw = Jraw
+        self.rawFileV = Vraw
 
-         self.filtlabels = list(filter(None,self.filtlabels))
-         self.filtparams = self.filtparams[:len(self.filtlabels)]
-         self.filtV = list(filter(None,self.filtV))
-         self.filtJ = list(filter(None,self.filtJ))
-         self.filtderivJ = list(filter(None,self.filtderivJ))
-         self.filtderiv2J = list(filter(None,self.filtderiv2J))
-         self.filtE = list(filter(None,self.filtE))
-         self.filtE = [float(x) for x in self.filtE]
-         self.filtEEPF = list(filter(None,self.filtEEPF))
-         self.filtEEPF = self.filtEEPF[:len(self.filtE)]
-         return None
+        self.J = list(filter(None,J))
+        self.derivJ = list(filter(None,derivJ))
+        self.deriv2J = list(filter(None,deriv2J))
+        self.fileE = [float(x) for x in list(filter(None,E))]
+        self.fileEEPF = list(filter(None,EEPF))
+        self.fileEEPF = self.fileEEPF[:len(self.fileE)]
+        
+        sweepRate = self.filename[self.filename.find('ms')-1] # particular to this expt
+        self.filter = int(self.GodyakStats['filter '][0])
+        self.sweepRate = int(sweepRate)
 
-   def fileOK(self):
-      IrangetoImax = {100:100e-3,1000:10e-3,10000:1e-3} # ?? questionable
-      maxcurrent = IrangetoImax[float(self.GodyakStats['I range'])]
-      meascurrent = max(self.rawJavg)
-      if meascurrent > 1.05*maxcurrent:
-         return False
-      else:
-         return True
+        return None
 
-   def difftrace(self,x,y):
-      deriv = []
-      dx = x[3]-x[2]
-      for i in range(1,len(y)-1):
-         deriv.append((y[i+1]-y[i-1])/(2*dx))
-      deriv[0] = 2*deriv[1]-deriv[2]
-      deriv[-1] = 2*deriv[-2] - deriv[-3]
-      return deriv
+    def correctIV(self):
+        VfGodyak = float(self.GodyakStats['Vf'])
+        VpGodyak = float(self.GodyakStats['Vs'])
+        self.Vraw = [float(x) + VfGodyak for x in self.rawFileV]
+        self.V = [-float(x)+ VpGodyak for x in self.fileV]
+        probeArea = float(self.GodyakStats['A(mm2)'])
+        self.I = [x*probeArea for x in self.J]
+        self.Iraw = [x*probeArea for x in self.Jraw]
+        return None
 
-   def getDerivative(self): 
-       def deriv(x, y):
-           x = np.asarray(x)
-           y = np.asarray(y)
-           return np.gradient(y)/np.gradient(x)
-       self.Iprime = deriv(self.V, self.I)
+    def getDerivative(self): 
+        def deriv(x, y):
+            x = np.asarray(x)
+            y = np.asarray(y)
+            return np.gradient(y)/np.gradient(x)
+        self.Iprime = deriv(self.V, self.I)
+        self.I2prime = deriv(self.V, self.Iprime)
       
-   def recalcJavg(self,recalc=True):
-      mean,err = [],[]
-      try:
-         self.Jarray[0]
-      except IndexError:
-         self.Jerr = False
-         print('Data with only one voltage sweep')
-         self.rawJavg = self.rawJavg
-         return None
-      for ii in range(0,len(self.Jarray[0])):
-         tmp = []
-         for trace in self.Jarray:
-            try:
-               tmp.append(trace[ii])
-            except IndexError:
-               continue
-         if recalc:
-            mean.append(numpy.mean(tmp))
-            err.append(numpy.std(tmp))
-      if recalc:
-         self.rawJavg = mean
-      else:
-         self.rawJavg = self.rawJavg
-         self.rawJerr = err
-      
-      return None
+    def Ielectron(self,current = 0): # normalize current 
+        if current == 0:
+            current = self.I
+        try:
+            self.ionSat
+        except AttributeError:
+            self.getIonSat()
+        self.Ie = [x + self.ionSat for x in current]        
+        return self.Ie
 
-   def smoothIV(self,pointrange = 100,derivative=False,order=2,EEDFfilt=50):
-      # old method: smoothed = signal.medfilt(self.rawJavg,pointrange+1)
-      Javg = np.asarray(self.rawJavg)
-      smoothed = savitzky_golay(Javg,pointrange+1,2)
-      self.smoothJ = smoothed
-      print(len(smoothed),len(self.rawV))
+    def getVp(self):
+        try:
+            deriv = self.Iprime
+        except AttributeError:
+            self.getDerivative()
+        self.Vp = self.V[find(self.Iprime == max(self.Iprime))]
+        return self.Vp
 
-      if derivative:
-         # plot(self.rawV,self.rawJavg,self.rawV,smoothed)
-         # show()
-         # self.derivJ = self.difftrace(self.rawV,self.smoothJ)
-         self.derivJ = savitzky_golay(self.filtJ,EEDFfilt+1,3,1)
-         if order >= 2:
-            # self.deriv2J = self.difftrace(self.rawV,self.derivJ)
-            self.deriv2J = savitzky_golay(self.rawJavg,EEDFfilt+1,3,2)
-      if derivative and order == 2:
-         res = self.deriv2J
-      elif derivative and order == 1:
-         res = self.derivJ
-      else:
-         res = self.smoothJ
-      return res
-      
-      
-      
-   def Ielectron(self,current):
-      try:
-         self.Ie = current + self.ionSat
-      except AttributeError:
-         self.getIonSat()
-         self.Ie = current + self.ionSat
-      return self.Ie
+    def getVf(self,smooth = False): # iffy if I doesn't cross 0
+        if smooth:
+            trace = np.asarray(self.smoothJ)
+        else:
+            trace = np.asarray(self.I)
+        # establish that Vf is closest to zero point of current    
+        if min(trace) < 0:
+            self.Vf = self.V[find(abs(trace) == min(abs(trace)))]
+        elif min(self.I) > 0:
+            self.Vf = self.V[find(trace == min(trace))]
 
-   def getVp(self):
-      try:
-         deriv = self.Iprime
-      except AttributeError:
-         # self.smoothIV(100,True,1)
-         self.getDerivative()
-      self.Vp = self.V[find(self.Iprime == max(self.Iprime))]
-      return self.Vp
-
-   def Vfraw(self,smooth = False):
-      if smooth:
-         trace = self.smoothJ
-      else:
-         trace = self.rawJavg
-      # establish that Vf is closest to zero point of current    
-      if min(trace) < 0:
-         self.Vf = self.rawV[find(abs(trace) == min(abs(trace)))]
-      elif min(self.rawJavg) > 0:
-         self.Vf = self.rawV[find(trace == min(trace))]
-
-   def getIonSat(self):
-      if min(self.rawJavg) < 0:
-         # ion saturation is either min point, or most negatively biased point
-         ionSat = abs(min(min(self.rawJavg),-abs(self.rawJavg[0])))
-      elif min(self.rawJavg) > 0:
-         ionSat = abs(min(self.rawJavg))
-      else:
-         ionSat = 0
-         self.ionSat = ionSat
-      return ionSat
+    def getIonSat(self):
+        if min(self.I) < 0:
+            # ion saturation is either min point, or most negatively biased point
+            ionSat = abs(min(min(self.I),-abs(self.I[0])))
+        elif min(self.I) > 0:
+            ionSat = abs(min(self.I))
+        else:
+            ionSat = 0
+        self.ionSat = ionSat
+        return ionSat
    
-   def plotTrace(self,deriv1=True,deriv2=True):
-      
-      sweepRate = self.filename[self.filename.find('ms')-1]
-      filter, sweepRate = int(self.GodyakStats['filter '][0]), int(sweepRate)
-      self.filter = filter
-      self.sweepRate = sweepRate
-
-      colorDict = {(2,1):'g',(2,2):'b',(2,4):'m',(2,8):'k',(4,1):'r',(4,2):'c'}
-      
    
-      if self.B == 0:
-         subplot(2,1,1)
-      else:
-         subplot(2,1,2)
-         
-      fig = plot(self.V,self.I,'-', lw=3, color=colorDict[(filter, sweepRate)]) #, self.V,self.smoothJ,'r',lw=3)
+    def plotTrace(self, deriv1=True, deriv2=True, raw=False):
+        colorDict = self.colorDict
+        # if self.B == 0:
+        #     subplot(2,1,1)
+        # else:
+        #     subplot(2,1,2)
+        V = self.Vraw if raw else self.V
+        I = self.Iraw if raw else self.I
+        markStr = ':' if raw else '-'    
+        
+        fig = plot(V, I,markStr, lw=3, 
+            color=colorDict[(self.filter, self.sweepRate)]) #, self.V,self.smoothJ,'r',lw=3)
 
-      # add in plasma potential as a dotted line     
-      # plot([self.smoothVp,self.smoothVp],[min(self.rawJavg),max(self.rawJavg)],'-')
-      yscale('log')
-      if deriv1:
-         ratio1 = max(self.rawJavg)/max(self.derivJ)/8
-         plot(self.V,self.derivJ*ratio1,'m',lw=3)
-      if deriv2:
-         ratio2 = max(self.rawJavg)/max(self.deriv2J)/50
-         plot(self.V,self.deriv2J*ratio2,'g',lw=4)
-      # self.plotlabel()
-      ylabel('Current [A]',fontsize=20)
-      xlabel('Bias Voltage [V]',fontsize=20)
-      # text(self.Vp, max(self.I)/10, str(self.ind), color=colorDict[(filter, sweepRate)])
-      
-      # show()
-      return None
+        # add in plasma potential as a dotted line     
+        # plot([self.smoothVp,self.smoothVp],[min(self.rawJavg),max(self.rawJavg)],'-')
+        yscale('log')
+        if deriv1:
+            plot(self.V,self.Iprime, '--',color=colorDict[(self.filter, self.sweepRate)],lw=1)
+        if deriv2:
+            plot(self.V,self.I2prime,'-.',color=colorDict[(self.filter, self.sweepRate)],lw=1)
+        # self.plotlabel()
+        ylabel('Current [A]',fontsize=20)
+        xlabel('Bias Voltage [V]',fontsize=20)
+        # text(self.Vp, max(self.I)/10, str(self.ind), color=colorDict[(filter, sweepRate)])
+        # show()
+        return None
 
-   def plotlabel(self):
-      title('B ='+str(self.B)+', P ='+str(self.P)+', R ='+str(self.R)+' mm')
-      return None
+    def plotlabel(self):
+        title('B ='+str(self.B)+', P ='+str(self.P)+', R ='+str(self.R)+' mm')
+        return None
 
-   def plotEEDF(self):
-      try:    
-         plot(self.E,self.EEDF)
-      except AttributeError:
-         self.getEEDF()
-      yscale('log')
-      self.plotlabel()
-      show()
-      return None
+    def plotEEDF(self):
+        # if self.B == 0:
+        #     subplot(2,1,1)
+        # else:
+        #     subplot(2,1,2)
 
-   def getEEDF(self):
-      try:
-         EEDF = self.deriv2J
-      except AttributeError:
-         EEDF = self.smoothIV(100,True,2,50)
+        try:    
+            EEDF = self.EEDF
+        except AttributeError:
+            self.getEEDF()
 
-      self.E = [self.smoothVp - x for x in self.V]
-      for i in range(0,len(self.E)):
-         if self.E[i] < 0:
-            break
-      self.E = self.E[:i]    
-      self.EEDF = EEDF[:i]
-      return None   
+        try:
+            plot(self.E,self.EEDF, color=self.colorDict[(self.filter, self.sweepRate)])
+            yscale('log')
+            ylabel('EEDF [arb]')
+            xlabel('Energy [eV]')
+        except ValueError:
+            print("Didn't plot "+str(self.ind))
 
+        return None
+
+    def getEEDF(self):
+        try:
+            GodyakEEPF = self.fileEEPF
+            EEDF = self.I2prime
+        except AttributeError:
+            EEDF = self.getDerivative
+
+        self.E = [self.Vp - x for x in self.V]
+        # for i in range(0,len(self.E)):
+        #     if self.E[i] < 0:
+        #         break
+        # self.E = self.E[:i]
+        self.EEDF = EEDF # [:i]
+        return None   
+
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+        
+    # Old things down here, mostly for raw files
+    def recalcJavg(self,recalc=True): # for raw data only
+        mean,err = [],[]
+        try:
+            self.Jarray[0]
+        except IndexError:
+            self.Jerr = False
+            print('Data with only one voltage sweep')
+            self.rawJavg = self.rawJavg
+            return None
+        for ii in range(0,len(self.Jarray[0])):
+            tmp = []
+            for trace in self.Jarray:
+                try:
+                    tmp.append(trace[ii])
+                except IndexError:
+                    continue
+            if recalc:
+                mean.append(np.mean(tmp))
+                err.append(np.std(tmp))
+        if recalc:
+            self.rawJavg = mean
+        else:
+            self.rawJavg = self.rawJavg
+            self.rawJerr = err
+        return None
+
+    def smoothIV(self,pointrange = 100,derivative=False,order=2,EEDFfilt=50):
+        # old method: smoothed = signal.medfilt(self.rawJavg,pointrange+1)
+        Javg = np.asarray(self.rawJavg)
+        smoothed = savitzky_golay(Javg,pointrange+1,2)
+        self.smoothJ = smoothed
+        print(len(smoothed),len(self.rawV))
+        if derivative:
+            # plot(self.rawV,self.rawJavg,self.rawV,smoothed)
+            # show()
+            # self.derivJ = self.difftrace(self.rawV,self.smoothJ)
+            self.derivJ = savitzky_golay(self.filtJ,EEDFfilt+1,3,1)
+            if order >= 2:
+                # self.deriv2J = self.difftrace(self.rawV,self.derivJ)
+                self.deriv2J = savitzky_golay(self.rawJavg,EEDFfilt+1,3,2)
+        if derivative and order == 2:
+            res = self.deriv2J
+        elif derivative and order == 1:
+            res = self.derivJ
+        else:
+            res = self.smoothJ
+        return res
+
+    def fileOK(self): # ???
+        IrangetoImax = {100:100e-3,1000:10e-3,10000:1e-3} # ?? questionable
+        maxcurrent = IrangetoImax[float(self.GodyakStats['I range'])]
+        meascurrent = max(self.rawJavg)
+        if meascurrent > 1.05*maxcurrent:
+            return False
+        else:
+            return True

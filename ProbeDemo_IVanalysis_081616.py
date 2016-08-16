@@ -7,7 +7,7 @@ from IVclass import IVobj
 def main():
     cwd = os.getcwd()
     
-    path = "P:/departments/HTX/bkraus/ExpCampaign_EPionFlow_Aug2016/LPEP_ThrusterIonFlow_081116/"
+    path = "P:/departments/HTX/bkraus/ExpCampaign_EPionFlow_Aug2016/ProbeDemo_GodyakTest_081616/"
     os.chdir(path)
     files = os.listdir(path)
     txtFiles = [x for x in files if x[-4:] == '.txt']
@@ -19,36 +19,24 @@ def main():
         ind = x[x.find('W')+1:]
         ind = ind[:ind.find('.txt')]
         ind = int(ind)
-        if '250.6V' in x:
-            thisIV = IVobj(x,path,flow = 2.7,B = 2,P = 6e-5,V = 250.6,
-                            I = 0.616,pos = 10,ind = ind)
-        else:
-            thisIV = IVobj(x,path,flow = 3., B = 0, P = 6e-5, V = 68.7,
-                            I = 0.73, pos=5, ind=ind)
-        subplot(2,1,1)
+        thisIV = IVobj(x,path,flow = 0., B = 0, P = 0, V = 0,
+                            I = 0.0, pos=0, ind=ind)
+        # subplot(2,1,1)
         plot(-5,-5,'g',
               -5, -5, 'b',
-              -5, -5, 'm',
-              -5, -5, 'k',
               -5, -5, 'r',
               -5, -5, 'c',lw=3)
         legend(['Med Filter, 1 ms', 'Med Filter, 2 ms', 'Med Filter, 4 ms', 'Med Filter, 8 ms',
                 'Weak Filter, 1 ms', 'Weak Filter, 2 ms'], loc='best')
         if ((thisIV.filter == 2) or (thisIV.filter == 2)) and (thisIV.sweepRate == 2):
-            # figure(1)
-            # thisIV.plotTrace(True, True)
-            # figure(2)
-            try:
-                thisIV.plotEEDF()
-            except ValueError:
-                continue
+            figure(1)
+            thisIV.plotTrace(raw=False, deriv1 = False, deriv2 = False)
+            thisIV.plotTrace(raw=True, deriv1 = False, deriv2 = False)
+            figure(2)
+            thisIV.plotEEDF()
         print thisIV.ind, thisIV.B, thisIV.filter, thisIV.sweepRate, thisIV.Vf, thisIV.Vp, thisIV.ionSat
     try:
 
-        subplot(2,1,1)
-        text(5,5e-3, 'No Field', fontsize=20)
-        subplot(2,1,2)
-        text(0,9e-3, 'Field Current = 2 A', fontsize=20)
         show()
     except ValueError:
         print("Didn't show")
