@@ -25,21 +25,22 @@ def main():
         else:
             thisIV = IVobj(x,path,flow = 3., B = 0, P = 6e-5, V = 68.7,
                             I = 0.73, pos=5, ind=ind)
-        if ((thisIV.filter == 2) or (thisIV.filter == 2)) and (thisIV.sweepRate == 2):
-            # figure(1)
-            # thisIV.plotTrace(True, True)
-            # figure(2)
-            try:
-                thisIV.plotEEDF()
-            except ValueError:
-                continue
-        print thisIV.ind, thisIV.B, thisIV.filter, thisIV.sweepRate, thisIV.Vf, thisIV.Vp, thisIV.ionSat
+
+        frame = 0 if thisIV.B == 0 else 2
+        # if (thisIV.filter == 2) and (thisIV.sweepRate == 2):
+        figure(frame+1)
+        thisIV.plotTrace()
+        figure(frame+2)
+        thisIV.plotEEDF()
+        thisIV.findTe(4,10)
+
+        print thisIV.ind, thisIV.B, thisIV.filter, thisIV.sweepRate, thisIV.Vf, thisIV.Vp, thisIV.Te
     try:
 
-        subplot(2,1,1)
-        text(5,5e-3, 'No Field', fontsize=20)
-        subplot(2,1,2)
-        text(0,9e-3, 'Field Current = 2 A', fontsize=20)
+        # subplot(2,1,1)
+        # text(5,5e-3, 'No Field', fontsize=20)
+        # subplot(2,1,2)
+        # text(0,9e-3, 'Field Current = 2 A', fontsize=20)
         show()
     except ValueError:
         print("Didn't show")

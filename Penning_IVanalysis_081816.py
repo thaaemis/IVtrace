@@ -7,7 +7,7 @@ from IVclass import IVobj
 def main():
     cwd = os.getcwd()
     
-    path = "P:/departments/HTX/bkraus/ExpCampaign_EPionFlow_Aug2016/ProbeDemo_GodyakTest_081616/"
+    path = "P:/departments/HTX/bkraus/ExpCampaign_EPionFlow_Aug2016/LPEP_PenningProbeCheck_081616/"
     # os.chdir(path)
     files = os.listdir(path)
     # os.chdir(cwd)
@@ -19,8 +19,8 @@ def main():
         ind = x[x.find('W')+1:]
         ind = ind[:ind.find('.txt')]
         ind = int(ind)
-        thisIV = IVobj(x,path,flow = 0., B = 0, P = 0, V = 0,
-                            I = 0.0, pos=0, ind=ind)
+        thisIV = IVobj(x,path,flow = 0.17, B = 10, P = 2.7e-4, V = 55,
+                            I = 1.21, pos=4, ind=ind)
         # subplot(2,1,1)
 
         #     if ((thisIV.filter == 2) or (thisIV.filter == 2)) and (thisIV.sweepRate == 2):
@@ -31,17 +31,18 @@ def main():
         
         figure(2)
         thisIV.plotEEDF()
-        # print thisIV.ind, thisIV.B, thisIV.filter, thisIV.sweepRate, thisIV.Vf, thisIV.Vp, thisIV.ionSat
-        thisIV.findTe(2,5)
-
+        thisIV.findTe(2,8)
+        print thisIV.ind, thisIV.filter, thisIV.sweepRate, thisIV.Vf, thisIV.Vp, thisIV.Te
+        
+        
     figure(1)
-    manualVmeas = [0, 1, 2, 3, 4, 5, -5, 10]
-    manualImeas = [-.0145, -.0074, .0034, .0221, .0552, .1139, -.0343, .886]
+    manualVmeas = [-1.243]
+    manualImeas = [.0778]
     manualV = [manualVmeas[i] - manualImeas[i] for i in range(len(manualVmeas))]
     manualI = [x/108. for x in manualImeas]
     plot(manualV, manualI, 'k*', markersize=20, label="Manual Points")
     legend(loc="best")
-    text(6.5, 1e-4, 'Probe Demo Test',fontsize=20)
+    text(-2, 1e-4, 'Penning, 10 G, R = 4 cm',fontsize=20)
     
     show()
    

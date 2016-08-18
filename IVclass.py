@@ -13,6 +13,7 @@
     # plotTrace()
 
 from scipy import signal
+from scipy.optimize import curve_fit
 import numpy as np
 from pylab import *
 # from savitsky import savitzky_golay
@@ -85,6 +86,7 @@ class IVobj:
        self.Ielectron()
        self.getVf()
        self.getVp()
+       self.getEEDF()
 
     def getData(self,path = ''):
         if path == '':
@@ -146,7 +148,8 @@ class IVobj:
         self.GodyakStats = GodyakParams
         self.labels = list(filter(None,labels))
         self.params = params[:len(self.labels)]
-        self.fileV = list(filter(None,V))
+        # self.fileV = list(filter(None,V))
+        self.fileV = V
         if (np.shape(Jraw)[0] > 0):
             Jraw = np.mean(Jraw, 0)
         else:
@@ -154,7 +157,7 @@ class IVobj:
         self.Jraw = Jraw
         self.rawFileV = Vraw
 
-        self.J = list(filter(None,J))
+        self.J = J
         self.derivJ = list(filter(None,derivJ))
         self.deriv2J = list(filter(None,deriv2J))
         self.fileE = [float(x) for x in list(filter(None,E))]
@@ -164,6 +167,9 @@ class IVobj:
         sweepRate = self.filename[self.filename.find('ms')-1] # particular to this expt
         self.filter = int(self.GodyakStats['filter '][0])
         self.sweepRate = int(sweepRate)
+        
+        self.label = 'Weak' if self.filter == 4 else 'Medium'
+        self.label += ' Filter, ' + str(self.sweepRate) + ' ms'
 
         return None
 
@@ -171,7 +177,7 @@ class IVobj:
         VfGodyak = float(self.GodyakStats['Vf'])
         VpGodyak = float(self.GodyakStats['Vs'])
         self.Vraw = [float(x) + VfGodyak for x in self.rawFileV]
-        self.V = [-float(x)+ VpGodyak for x in self.fileV]
+        self.V = [-float(x)+ float(VpGodyak) for x in self.fileV]
         probeArea = float(self.GodyakStats['A(mm2)'])
         self.I = [x*probeArea for x in self.J]
         self.Iraw = [x*probeArea for x in self.Jraw]
@@ -226,7 +232,7 @@ class IVobj:
         return ionSat
    
    
-    def plotTrace(self, deriv1=True, deriv2=True, raw=False):
+    def plotTrace(self, deriv1=True, deriv2=True, raw=False, label = False):
         colorDict = self.colorDict
         # if self.B == 0:
         #     subplot(2,1,1)
@@ -234,21 +240,27 @@ class IVobj:
         #     subplot(2,1,2)
         V = self.Vraw if raw else self.V
         I = self.Iraw if raw else self.I
-        markStr = ':' if raw else '-'    
+        markStr = ':' if raw else 'o'    
+        if label == False:
+            label = '_'
+        else:
+            label = self.label + " (Raw)" if raw else self.label
         
-        fig = plot(V, I,markStr, lw=3, 
-            color=colorDict[(self.filter, self.sweepRate)]) #, self.V,self.smoothJ,'r',lw=3)
+        fig = plot(V, [abs(x) for x in I],markStr, lw=3, 
+            color=colorDict[(self.filter, self.sweepRate)], label=label) #, self.V,self.smoothJ,'r',lw=3)
 
         # add in plasma potential as a dotted line     
         # plot([self.smoothVp,self.smoothVp],[min(self.rawJavg),max(self.rawJavg)],'-')
         yscale('log')
         if deriv1:
-            plot(self.V,self.Iprime, '--',color=colorDict[(self.filter, self.sweepRate)],lw=1)
+            plot(self.V,self.Iprime, '--',color=colorDict[(self.filter, self.sweepRate)],lw=1,label="_")
         if deriv2:
-            plot(self.V,self.I2prime,'-.',color=colorDict[(self.filter, self.sweepRate)],lw=1)
+            plot(self.V,self.I2prime,'-.',color=colorDict[(self.filter, self.sweepRate)],lw=1,label="_")
         # self.plotlabel()
         ylabel('Current [A]',fontsize=20)
         xlabel('Bias Voltage [V]',fontsize=20)
+        xticks(fontsize=16)
+        yticks(fontsize=16)
         # text(self.Vp, max(self.I)/10, str(self.ind), color=colorDict[(filter, sweepRate)])
         # show()
         return None
@@ -258,11 +270,6 @@ class IVobj:
         return None
 
     def plotEEDF(self):
-        # if self.B == 0:
-        #     subplot(2,1,1)
-        # else:
-        #     subplot(2,1,2)
-
         try:    
             EEDF = self.EEDF
         except AttributeError:
@@ -293,8 +300,20 @@ class IVobj:
         self.EEDF = EEDF # [:i]
         return None   
 
+    def findTe(self, minE, maxE):
+        def f(x, A, B):
+            return A*x + B
         
-        
+        minInd = [i for i in range(len(self.E)) if self.E[i] > minE][0]
+        maxInd = [i for i in range(len(self.E)) if self.E[i] < maxE][-1]
+        E = self.E[minInd:maxInd]
+        EEDF = self.EEDF[minInd:maxInd]
+        lnEEDF = [np.log(x) for x in EEDF]
+        try:
+            [A, B], covariance = curve_fit(f, E, lnEEDF)
+            self.Te = -1./A
+        except ValueError:
+            self.Te = None
         
         
         
